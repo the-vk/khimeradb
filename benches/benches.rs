@@ -13,5 +13,21 @@ pub fn bench_memory_log_10000_appends(c: &mut Criterion) {
     }));
 }
 
-criterion_group!(benches, bench_memory_log_10000_appends);
+pub fn bench_memory_log_10000_iterator(c: &mut Criterion) {
+    let mut log = MemoryLog::new();
+    let entry = [0; 100];
+    for _ in 0..10000 {
+        log.append(&entry);
+    }
+    
+    c.bench_function("MemoryLog 10000 iterator", |b| b.iter(|| {
+        for _ in log.into_iter() {
+        }
+    }));
+}
+
+criterion_group!(benches,
+    bench_memory_log_10000_appends,
+    bench_memory_log_10000_iterator,
+);
 criterion_main!(benches);
