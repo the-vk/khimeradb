@@ -17,7 +17,7 @@ impl <T> Log<T>
 
     // Append a new entry to the log
     pub fn append(&mut self, entry: &[u8]) -> std::io::Result<()> {
-        let size = entry.len() as u64;
+        let size = entry.len() as u32;
         let size_bytes = size.to_be_bytes();
         self.storage.borrow_mut().seek(SeekFrom::End(0))?;
         self.storage.borrow_mut().write(&size_bytes)?;
@@ -56,14 +56,14 @@ impl<'a, T> Iterator for LogIterator<'a, T>
             return None;
         }
 
-        let mut size_bytes = [0; 8];
+        let mut size_bytes = [0; 4];
         match log.read(&mut size_bytes) {
             Ok(0) => return None,
             Err(_) => return None,
             _ => {}
         }
 
-        let size = u64::from_be_bytes(size_bytes) as usize;
+        let size = u32::from_be_bytes(size_bytes) as usize;
         let mut entry = vec![0; size];
         match log.read(&mut entry) {
             Ok(0) => return None,
@@ -71,7 +71,7 @@ impl<'a, T> Iterator for LogIterator<'a, T>
             _ => {}
         }
 
-        self.position += 8 + size as u64;
+        self.position += 4 + size as u64;
         Some(entry.into_boxed_slice())
     }
 }
