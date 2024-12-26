@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use khimeradb::{FileSegmentStream, Log};
+use khimeradb::{streams::FileSegmentStream, Log};
 use tempfile::tempfile;
 
 const MESSAGE_SIZE: usize = 1024;
