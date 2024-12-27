@@ -3,11 +3,17 @@ name = "khimeradb"
 version = "0.1.0"
 edition = "2021"
 
+[rust]
+debuginfo-level=1
+
+[profile.release]
+debug = 1
+
 [dependencies]
+tempfile = "3.10.1"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }
-tempfile = "3.10.1"
 
 [[bench]]
 name = "benches"
