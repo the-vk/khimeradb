@@ -5,6 +5,7 @@ use tempfile::tempdir;
 
 const MESSAGE_SIZE: usize = 1024;
 const ITERATIONS: usize = 10000;
+const SEGMENT_SIZE: u64 = 1024 * 1024;
 
 fn main() {
     println!("Running FileSegmentLog profile");
@@ -17,7 +18,7 @@ fn main() {
 
     println!("Do iterators");
     for i in 0..10 {
-        let count = do_iterations();
+        let _ = do_iterations();
         println!("iterations: {}", i);
     }
 
@@ -26,7 +27,7 @@ fn main() {
 
 fn do_appends() {
     let tempdir = tempdir().unwrap();
-    let storage = FileSegmentStream::new(tempdir.path().to_path_buf(), 1024);
+    let storage = FileSegmentStream::new(tempdir.path().to_path_buf(), SEGMENT_SIZE);
     let mut log = Log::new(RefCell::new(storage));
 
     let data = [0; MESSAGE_SIZE];
@@ -38,7 +39,7 @@ fn do_appends() {
 
 fn do_iterations() -> i32 {
     let tempdir = tempdir().unwrap();
-    let storage = FileSegmentStream::new(tempdir.path().to_path_buf(), 1024);
+    let storage = FileSegmentStream::new(tempdir.path().to_path_buf(), SEGMENT_SIZE);
     let mut log = Log::new(RefCell::new(storage));
 
     let data = [0; MESSAGE_SIZE];
