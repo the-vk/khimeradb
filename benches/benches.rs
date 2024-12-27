@@ -6,6 +6,7 @@ use tempfile::tempfile;
 
 const MESSAGE_SIZE: usize = 1024;
 const ITERATIONS: usize = 1000;
+const SEGMENT_SIZE: u64 = 1024 * 1024;  // 1 MiB
 
 pub fn bench_memory_log_10000_appends(c: &mut Criterion) {
     c.bench_function("MemoryLog appends", |b| b.iter(|| {
@@ -51,7 +52,7 @@ pub fn bench_file_log_10000_iterator(c: &mut Criterion) {
 pub fn bench_file_segment_log_10000_appends(c: &mut Criterion) {
     c.bench_function("FileSegmentLog appends", |b| b.iter(|| {
         let tempdir = tempfile::tempdir().unwrap();
-        let storage = FileSegmentStream::new(tempdir.path().to_path_buf(), 1024);
+        let storage = FileSegmentStream::new(tempdir.path().to_path_buf(), SEGMENT_SIZE);
         let mut log = Log::new(RefCell::new(storage));
 
         let data = [0; MESSAGE_SIZE];
@@ -65,7 +66,7 @@ pub fn bench_file_segment_log_10000_appends(c: &mut Criterion) {
 pub fn bench_file_segment_log_10000_iterator(c: &mut Criterion) {
     c.bench_function("FileSegmentLog iterations", |b| b.iter(|| {
         let tempdir = tempfile::tempdir().unwrap();
-        let storage = FileSegmentStream::new(tempdir.path().to_path_buf(), 1024);
+        let storage = FileSegmentStream::new(tempdir.path().to_path_buf(), SEGMENT_SIZE);
         let mut log = Log::new(RefCell::new(storage));
 
         let data = [0; 1024];
