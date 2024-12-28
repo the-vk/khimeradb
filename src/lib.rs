@@ -1,3 +1,4 @@
+pub mod kv;
 pub mod streams;
 
 use std::{cell::RefCell, io::{Read, Seek, SeekFrom, Write}};
