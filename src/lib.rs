@@ -38,6 +38,7 @@ impl<'a, T> IntoIterator for &'a Log<T>
         LogIterator {
             log: &self.storage,
             position: 0,
+            buf: Vec::new(),
         }
     }
 }
@@ -46,6 +47,7 @@ pub struct LogIterator<'a, T>
     where T: Read + Write + Seek {
     log: &'a RefCell<T>,
     position: u64,
+    buf: Vec<u8>,
 }
 
 impl<'a, T> Iterator for LogIterator<'a, T>
@@ -66,15 +68,18 @@ impl<'a, T> Iterator for LogIterator<'a, T>
         }
 
         let size = u32::from_be_bytes(size_bytes) as usize;
-        let mut entry = vec![0; size];
-        match log.read(&mut entry) {
+        if self.buf.len() < size {
+            self.buf.resize(size, 0);
+        }
+
+        match log.read(&mut self.buf[..size]) {
             Ok(0) => return None,
             Err(_) => return None,
             _ => {}
         }
 
         self.position += 4 + size as u64;
-        Some(entry.into_boxed_slice())
+        Some(Box::from(&self.buf[..size]))
     }
 }
 
