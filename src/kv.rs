@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(&data[pos..pos+6], b"value2"); // value
         
         // Verify total length is correct
-        assert_eq!(data.len(), 26); // (4+1+4+6) * 2 entries
+        assert_eq!(data.len(), 30);
     }
 
     #[test]
