@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::io::{self, Write};
+use std::io::{self, Write, Cursor};
 
 const SEGMENT_SIZE_LIMIT: usize = 1024;
 
@@ -290,5 +290,40 @@ mod tests {
         
         assert!(table.get("key1").is_none());
         assert_eq!(&*table.get("key2").unwrap(), b"value2");
+    }
+
+    #[test]
+    fn test_write_segment() {
+        let mut table = SSTable::new();
+        table.insert("key1", b"value1");
+        table.insert("key2", b"value2");
+        
+        let mut cursor = Cursor::new(Vec::new());
+        table.write_segment(&mut cursor, &table.segments[0]).unwrap();
+        
+        let data = cursor.into_inner();
+        
+        // Verify that "key1" was written correctly
+        let mut pos = 0;
+        assert_eq!(&data[pos..pos+4], b"key1");  // key
+        pos += 4;
+        assert_eq!(data[pos], 0);                // null terminator
+        pos += 1;
+        assert_eq!(&data[pos..pos+4], &6u32.to_le_bytes());  // value length
+        pos += 4;
+        assert_eq!(&data[pos..pos+6], b"value1"); // value
+        pos += 6;
+        
+        // Verify that "key2" was written correctly
+        assert_eq!(&data[pos..pos+4], b"key2");  // key
+        pos += 4;
+        assert_eq!(data[pos], 0);                // null terminator
+        pos += 1;
+        assert_eq!(&data[pos..pos+4], &6u32.to_le_bytes());  // value length
+        pos += 4;
+        assert_eq!(&data[pos..pos+6], b"value2"); // value
+        
+        // Verify total length is correct
+        assert_eq!(data.len(), 26); // (4+1+4+6) * 2 entries
     }
 }
