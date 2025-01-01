@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::io::{self, Write, Cursor};
+use std::io::{self, Write, Read, Cursor};
 
 const SEGMENT_SIZE_LIMIT: usize = 1024;
 
@@ -120,6 +120,51 @@ impl SSTable {
             }
         }
         Ok(())
+    }
+
+    fn read_segment<R: Read>(&self, reader: &mut R) -> io::Result<SSTableSegment> {
+        let mut segment = SSTableSegment::new();
+        let mut buffer = Vec::new();
+        
+        loop {
+            // Read key until null terminator
+            buffer.clear();
+            let mut byte = [0u8];
+            
+            loop {
+                match reader.read_exact(&mut byte) {
+                    Ok(_) if byte[0] == 0 => break,
+                    Ok(_) => buffer.push(byte[0]),
+                    Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                        return if buffer.is_empty() {
+                            Ok(segment)
+                        } else {
+                            Err(e)
+                        }
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            
+            let key = String::from_utf8(buffer.clone())
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            
+            // Read value length
+            let mut len_bytes = [0u8; 4];
+            reader.read_exact(&mut len_bytes)?;
+            let value_len = u32::from_le_bytes(len_bytes) as usize;
+            
+            if value_len == 0 {
+                segment.insert(key, None);
+            } else {
+                // Read value
+                if buffer.len() < value_len {
+                    buffer.resize(value_len, 0);
+                }
+                reader.read_exact(&mut buffer[..value_len])?;
+                segment.insert(key, Some(buffer[..value_len].to_vec()));
+            }
+        }
     }
 }
 
@@ -325,5 +370,50 @@ mod tests {
         
         // Verify total length is correct
         assert_eq!(data.len(), 26); // (4+1+4+6) * 2 entries
+    }
+
+    #[test]
+    fn test_read_segment() {
+        let mut table = SSTable::new();
+        table.insert("key1", b"value1");
+        table.insert("key2", b"value2");
+        table.delete("key3");
+        
+        let mut buffer = Vec::new();
+        {
+            let mut cursor = Cursor::new(&mut buffer);
+            table.write_segment(&mut cursor, &table.segments[0]).unwrap();
+        }
+        
+        let mut cursor = Cursor::new(&buffer);
+        let segment = table.read_segment(&mut cursor).unwrap();
+        
+        // Verify segment contents
+        assert_eq!(segment.data.len(), 3);
+        assert_eq!(segment.data.get("key1").unwrap().as_ref().unwrap(), b"value1");
+        assert_eq!(segment.data.get("key2").unwrap().as_ref().unwrap(), b"value2");
+        assert!(segment.data.get("key3").unwrap().is_none());
+        
+        // Verify segment size tracking
+        assert_eq!(segment.size, "key1".len() + "value1".len() + 
+                               "key2".len() + "value2".len() +
+                               "key3".len());
+    }
+
+    #[test]
+    fn test_read_segment_empty() {
+        let table = SSTable::new();
+        let mut cursor = Cursor::new(Vec::new());
+        let segment = table.read_segment(&mut cursor).unwrap();
+        assert_eq!(segment.data.len(), 0);
+        assert_eq!(segment.size, 0);
+    }
+
+    #[test]
+    fn test_read_segment_invalid_utf8() {
+        let table = SSTable::new();
+        let invalid_data = vec![0xFF, 0xFF, 0x00];  // Invalid UTF-8 sequence
+        let mut cursor = Cursor::new(&invalid_data);
+        assert!(table.read_segment(&mut cursor).is_err());
     }
 }
