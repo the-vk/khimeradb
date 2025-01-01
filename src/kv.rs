@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::{self, Write};
 
 const SEGMENT_SIZE_LIMIT: usize = 1024;
 
@@ -97,6 +98,28 @@ impl SSTable {
         }
 
         self.segments = new_segments;
+    }
+
+    fn write_segment<W: Write>(&self, writer: &mut W, segment: &SSTableSegment) -> io::Result<()> {
+        for (key, value) in &segment.data {
+            // Write key as UTF-8 followed by null terminator
+            writer.write_all(key.as_bytes())?;
+            writer.write_all(&[0])?;
+
+            match value {
+                Some(v) => {
+                    // Write value length as u32 (4 bytes)
+                    writer.write_all(&(v.len() as u32).to_le_bytes())?;
+                    // Write value bytes
+                    writer.write_all(v)?;
+                }
+                None => {
+                    // For deleted entries, write length as 0
+                    writer.write_all(&[0, 0, 0, 0])?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
