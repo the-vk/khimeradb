@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use khimeradb::{streams::FileSegmentStream, Log};
+use khimeradb::{streams::FileSegmentStream, log::Log};
 use tempfile::tempdir;
 
 const MESSAGE_SIZE: usize = 1024;
