@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::{self, Write, Read};
-use std::path::Path;
+use std::path::{Path};
 
 const SEGMENT_SIZE_LIMIT: usize = 1024;
 
@@ -47,10 +47,14 @@ pub struct SSTable {
 }
 
 impl SSTable {
-    pub fn new() -> Self {
-        SSTable {
-            segments: vec![SSTableSegment::new(0)],
+    pub fn try_new(path: &Path) -> io::Result<Self> {
+        let mut segments = SSTable::read(path).unwrap_or_default();
+        if segments.len() == 0 {
+            segments.push(SSTableSegment::new(0));
         }
+        Ok(SSTable {
+            segments,
+        })
     }
 
     pub fn insert(&mut self, key: &str, value: &[u8]) {
@@ -109,7 +113,7 @@ impl SSTable {
         self.segments = new_segments;
     }
 
-    fn read(path: &Path) -> io::Result<SSTable> {
+    fn read(path: &Path) -> io::Result<Vec<SSTableSegment>> {
         if !path.is_dir() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "Path is not a directory"));
         }
@@ -160,7 +164,7 @@ impl SSTable {
             segments.push(segment);
         }
 
-        Ok(SSTable { segments })
+        Ok(segments)
     }
 
     fn write(&self, path: &Path) -> io::Result<()> {
@@ -263,14 +267,14 @@ mod tests {
 
     #[test]
     fn test_insert_and_get() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         table.insert("key1", b"value1");
         assert_eq!(&*table.get("key1").unwrap(), b"value1");
     }
 
     #[test]
     fn test_overwrite_value() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         table.insert("key1", b"value1");
         table.insert("key1", b"value2");
         assert_eq!(&*table.get("key1").unwrap(), b"value2");
@@ -278,20 +282,20 @@ mod tests {
 
     #[test]
     fn test_get_non_existent() {
-        let table = SSTable::new();
+        let table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         assert!(table.get("missing").is_none());
     }
 
     #[test]
     fn test_empty_value() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         table.insert("empty", b"");
         assert_eq!(&*table.get("empty").unwrap(), b"");
     }
 
     #[test]
     fn test_multiple_entries() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         let entries = vec![
             ("key1", b"value1"),
             ("key2", b"value2"),
@@ -309,7 +313,7 @@ mod tests {
 
     #[test]
     fn test_data_size_tracking() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         assert_eq!(table.segments[0].size, 0);
         
         table.insert("key1", b"value1");
@@ -324,7 +328,7 @@ mod tests {
 
     #[test]
     fn test_delete() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         table.insert("key1", b"value1");
         assert_eq!(&*table.get("key1").unwrap(), b"value1");
         
@@ -334,7 +338,7 @@ mod tests {
 
     #[test]
     fn test_delete_and_reinsert() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         table.insert("key1", b"value1");
         table.delete("key1");
         table.insert("key1", b"value2");
@@ -343,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_segment_chaining() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         
         // Fill first segment
         table.insert("key1", &filler()[..SEGMENT_SIZE_LIMIT/2]);
@@ -358,7 +362,7 @@ mod tests {
 
     #[test]
     fn test_segment_value_shadowing() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         
         table.insert("key1", b"value1");
         table.insert("filler", &filler());  // Force new segment
@@ -369,7 +373,7 @@ mod tests {
 
     #[test]
     fn test_delete_in_new_segment() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         
         table.insert("key1", b"value1");
         table.insert("filler", &filler());  // Force new segment
@@ -380,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_compact() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         
         table.insert("key1", b"value1");
         table.insert("filler", &filler());
@@ -398,7 +402,7 @@ mod tests {
 
     #[test]
     fn test_compact_with_deletions() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         
         table.insert("key1", b"value1");
         table.insert("key2", b"value2");
@@ -414,7 +418,7 @@ mod tests {
 
     #[test]
     fn test_write_segment() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         table.insert("key1", b"value1");
         table.insert("key2", b"value2");
         
@@ -449,7 +453,7 @@ mod tests {
 
     #[test]
     fn test_read_segment() {
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         table.insert("key1", b"value1");
         table.insert("key2", b"value2");
         table.delete("key3");
@@ -495,7 +499,7 @@ mod tests {
         let dir = tempdir()?;
         
         // Create and populate table
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(dir.path()).unwrap();
         table.insert("key1", b"value1");
         table.insert("key2", b"value2");
         
@@ -529,7 +533,7 @@ mod tests {
         }
         
         // Read table back
-        let read_table = SSTable::read(dir.path())?;
+        let read_table = SSTable::try_new(dir.path())?;
         
         // Verify contents
         assert_eq!(read_table.segments.len(), table.segments.len() - 1);
@@ -541,18 +545,18 @@ mod tests {
     #[test]
     fn test_write_read_empty_table() -> io::Result<()> {
         let dir = tempdir()?;
-        let table = SSTable::new();
+        let table = SSTable::try_new(dir.path()).unwrap();
         
         table.write(dir.path())?;
-        let read_table = SSTable::read(dir.path())?;
+        let read_table = SSTable::try_new(dir.path())?;
         
-        assert_eq!(read_table.segments.len(), 0);
+        assert_eq!(read_table.segments.len(), 1);
         Ok(())
     }
 
     #[test]
     fn test_write_invalid_path() {
-        let table = SSTable::new();
+        let table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         let result = table.write(Path::new("/nonexistent/path"));
         assert!(result.is_err());
     }
@@ -582,7 +586,7 @@ mod tests {
     fn test_write_idempotency() -> io::Result<()> {
         let dir = tempdir()?;
         
-        let mut table = SSTable::new();
+        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         table.insert("key1", b"value1");
         table.insert("filler", &filler());
         
