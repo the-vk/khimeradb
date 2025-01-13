@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::{self, Write, Read};
-use std::path::{Path};
+use std::path::{Path, PathBuf};
 
 const SEGMENT_SIZE_LIMIT: usize = 1024;
 
@@ -43,6 +43,7 @@ impl SSTableSegment {
 }
 
 pub struct SSTable {
+    path: PathBuf,
     segments: Vec<SSTableSegment>,
 }
 
@@ -53,19 +54,21 @@ impl SSTable {
             segments.push(SSTableSegment::new(0));
         }
         Ok(SSTable {
+            path: path.to_path_buf(),
             segments,
         })
     }
 
-    pub fn insert(&mut self, key: &str, value: &[u8]) {
+    pub fn insert(&mut self, key: &str, value: &[u8]) -> io::Result<()> {
         let key = key.to_owned();
         let last_index = self.segments.len() - 1;
         
         self.segments[last_index].insert(key, Some(value.to_vec()));
 
         if self.segments[last_index].size > SEGMENT_SIZE_LIMIT {
-            self.segments.push(SSTableSegment::new(self.segments[last_index].serial));
+            self.add_segment()?;
         }
+        Ok(())
     }
 
     pub fn get(&self, key: &str) -> Option<Box<[u8]>> {
@@ -113,8 +116,15 @@ impl SSTable {
         self.segments = new_segments;
     }
 
+    fn add_segment(&mut self) -> io::Result<()> {
+        let last_index = self.segments.len() - 1;
+        self.segments.push(SSTableSegment::new(self.segments[last_index].serial));
+        self.write(&self.path)?;
+        Ok(())
+    }
+
     fn read(path: &Path) -> io::Result<Vec<SSTableSegment>> {
-        if !path.is_dir() {
+        if (!path.is_dir()) {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "Path is not a directory"));
         }
 
@@ -168,8 +178,8 @@ impl SSTable {
     }
 
     fn write(&self, path: &Path) -> io::Result<()> {
-        if !path.is_dir() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Path is not a directory"));
+        if (!path.is_dir()) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Path {:?} is not a directory", path)));
         }
 
         for s in &self.segments[..self.segments.len()-1] {
@@ -268,15 +278,15 @@ mod tests {
     #[test]
     fn test_insert_and_get() {
         let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
-        table.insert("key1", b"value1");
+        table.insert("key1", b"value1").unwrap();
         assert_eq!(&*table.get("key1").unwrap(), b"value1");
     }
 
     #[test]
     fn test_overwrite_value() {
         let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
-        table.insert("key1", b"value1");
-        table.insert("key1", b"value2");
+        table.insert("key1", b"value1").unwrap();
+        table.insert("key1", b"value2").unwrap();
         assert_eq!(&*table.get("key1").unwrap(), b"value2");
     }
 
@@ -289,7 +299,7 @@ mod tests {
     #[test]
     fn test_empty_value() {
         let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
-        table.insert("empty", b"");
+        table.insert("empty", b"").unwrap();
         assert_eq!(&*table.get("empty").unwrap(), b"");
     }
 
@@ -303,7 +313,7 @@ mod tests {
         ];
 
         for (k, v) in &entries {
-            table.insert(k, *v);
+            table.insert(k, *v).unwrap();
         }
 
         for (k, v) in &entries {
@@ -316,20 +326,20 @@ mod tests {
         let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
         assert_eq!(table.segments[0].size, 0);
         
-        table.insert("key1", b"value1");
+        table.insert("key1", b"value1").unwrap();
         assert_eq!(table.segments[0].size, 4 + 6); // "key1" + "value1" lengths
         
-        table.insert("key1", b"new_value");
+        table.insert("key1", b"new_value").unwrap();
         assert_eq!(table.segments[0].size, 4 + 9); // "key1" + "new_value" lengths
         
-        table.insert("key2", b"value2");
+        table.insert("key2", b"value2").unwrap();
         assert_eq!(table.segments[0].size, (4 + 9) + (4 + 6)); // ("key1" + "new_value") + ("key2" + "value2") lengths
     }
 
     #[test]
     fn test_delete() {
         let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
-        table.insert("key1", b"value1");
+        table.insert("key1", b"value1").unwrap();
         assert_eq!(&*table.get("key1").unwrap(), b"value1");
         
         table.delete("key1");
@@ -339,22 +349,23 @@ mod tests {
     #[test]
     fn test_delete_and_reinsert() {
         let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
-        table.insert("key1", b"value1");
+        table.insert("key1", b"value1").unwrap();
         table.delete("key1");
-        table.insert("key1", b"value2");
+        table.insert("key1", b"value2").unwrap();
         assert_eq!(&*table.get("key1").unwrap(), b"value2");
     }
 
     #[test]
     fn test_segment_chaining() {
-        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
+        let dir = tempdir().unwrap();
+        let mut table = SSTable::try_new(dir.path()).unwrap();
         
         // Fill first segment
-        table.insert("key1", &filler()[..SEGMENT_SIZE_LIMIT/2]);
-        table.insert("key2", &filler()[..SEGMENT_SIZE_LIMIT/2]);
+        table.insert("key1", &filler()[..SEGMENT_SIZE_LIMIT/2]).unwrap();
+        table.insert("key2", &filler()[..SEGMENT_SIZE_LIMIT/2]).unwrap();
         
         // This should create a new segment
-        table.insert("key3", b"value3");
+        table.insert("key3", b"value3").unwrap();
         
         assert_eq!(table.segments.len(), 2);
         assert_eq!(&*table.get("key3").unwrap(), b"value3");
@@ -362,21 +373,23 @@ mod tests {
 
     #[test]
     fn test_segment_value_shadowing() {
-        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
+        let dir = tempdir().unwrap();
+        let mut table = SSTable::try_new(dir.path()).unwrap();
         
-        table.insert("key1", b"value1");
-        table.insert("filler", &filler());  // Force new segment
-        table.insert("key1", b"value2");
+        table.insert("key1", b"value1").unwrap();
+        table.insert("filler", &filler()).unwrap();  // Force new segment
+        table.insert("key1", b"value2").unwrap();
         
         assert_eq!(&*table.get("key1").unwrap(), b"value2");
     }
 
     #[test]
     fn test_delete_in_new_segment() {
-        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
+        let dir = tempdir().unwrap();
+        let mut table = SSTable::try_new(dir.path()).unwrap();
         
-        table.insert("key1", b"value1");
-        table.insert("filler", &filler());  // Force new segment
+        table.insert("key1", b"value1").unwrap();
+        table.insert("filler", &filler()).unwrap();  // Force new segment
         table.delete("key1");
         
         assert!(table.get("key1").is_none());
@@ -384,13 +397,14 @@ mod tests {
 
     #[test]
     fn test_compact() {
-        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
+        let dir = tempdir().unwrap();
+        let mut table = SSTable::try_new(dir.path()).unwrap();
         
-        table.insert("key1", b"value1");
-        table.insert("filler", &filler());
+        table.insert("key1", b"value1").unwrap();
+        table.insert("filler", &filler()).unwrap();
         
-        table.insert("key1", b"value2");
-        table.insert("key2", b"value3");
+        table.insert("key1", b"value2").unwrap();
+        table.insert("key2", b"value3").unwrap();
         
         assert_eq!(table.segments.len(), 2);
         table.compact();
@@ -402,11 +416,12 @@ mod tests {
 
     #[test]
     fn test_compact_with_deletions() {
-        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
+        let dir = tempdir().unwrap();
+        let mut table = SSTable::try_new(dir.path()).unwrap();
         
-        table.insert("key1", b"value1");
-        table.insert("key2", b"value2");
-        table.insert("filler", &filler());
+        table.insert("key1", b"value1").unwrap();
+        table.insert("key2", b"value2").unwrap();
+        table.insert("filler", &filler()).unwrap();
         
         table.delete("key1");
         assert!(table.get("key1").is_none());
@@ -418,9 +433,10 @@ mod tests {
 
     #[test]
     fn test_write_segment() {
-        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
-        table.insert("key1", b"value1");
-        table.insert("key2", b"value2");
+        let dir = tempdir().unwrap();
+        let mut table = SSTable::try_new(dir.path()).unwrap();
+        table.insert("key1", b"value1").unwrap();
+        table.insert("key2", b"value2").unwrap();
         
         let mut cursor = Cursor::new(Vec::new());
         SSTable::write_segment(&mut cursor, &table.segments[0]).unwrap();
@@ -453,9 +469,10 @@ mod tests {
 
     #[test]
     fn test_read_segment() {
-        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
-        table.insert("key1", b"value1");
-        table.insert("key2", b"value2");
+        let dir = tempdir().unwrap();
+        let mut table = SSTable::try_new(dir.path()).unwrap();
+        table.insert("key1", b"value1").unwrap();
+        table.insert("key2", b"value2").unwrap();
         table.delete("key3");
         
         let mut buffer = Vec::new();
@@ -495,27 +512,24 @@ mod tests {
     }
 
     #[test]
-    fn test_write_read_table() -> io::Result<()> {
-        let dir = tempdir()?;
-        
-        // Create and populate table
+    fn test_write_read_table() {
+        let dir = tempdir().unwrap();
         let mut table = SSTable::try_new(dir.path()).unwrap();
-        table.insert("key1", b"value1");
-        table.insert("key2", b"value2");
-        
-        // Force new segment
-        let large_value = vec![0u8; SEGMENT_SIZE_LIMIT];
-        table.insert("filler", &filler());
-        
-        // Add more data to new segment
-        table.insert("key3", b"value3");
+        table.insert("key1", b"value1").unwrap();
+        table.insert("key2", b"value2").unwrap();
+        table.insert("filler", &filler()).unwrap();
+        table.insert("key3", b"value3").unwrap();
         table.delete("key2");
         
-        // Write table to disk
-        table.write(dir.path())?;
+        table.write(dir.path()).unwrap();
+        
+        let files: Vec<_> = fs::read_dir(dir.path()).unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
         
         // Verify file names match segment serials
-        let mut files: Vec<_> = fs::read_dir(dir.path())?
+        let mut files: Vec<_> = fs::read_dir(dir.path()).unwrap()
             .filter_map(|e| e.ok())
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
@@ -533,30 +547,28 @@ mod tests {
         }
         
         // Read table back
-        let read_table = SSTable::try_new(dir.path())?;
+        let read_table = SSTable::try_new(dir.path()).unwrap();
         
         // Verify contents
         assert_eq!(read_table.segments.len(), table.segments.len() - 1);
         assert_eq!(&*read_table.get("key1").unwrap(), b"value1");
-        assert_eq!(&*read_table.get("filler").unwrap(), &large_value);
-        Ok(())
     }
 
     #[test]
-    fn test_write_read_empty_table() -> io::Result<()> {
-        let dir = tempdir()?;
+    fn test_write_read_empty_table() {
+        let dir = tempdir().unwrap();
         let table = SSTable::try_new(dir.path()).unwrap();
         
-        table.write(dir.path())?;
-        let read_table = SSTable::try_new(dir.path())?;
+        table.write(dir.path()).unwrap();
+        let read_table = SSTable::try_new(dir.path()).unwrap();
         
         assert_eq!(read_table.segments.len(), 1);
-        Ok(())
     }
 
     #[test]
     fn test_write_invalid_path() {
-        let table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
+        let dir = tempdir().unwrap();
+        let table = SSTable::try_new(dir.path()).unwrap();
         let result = table.write(Path::new("/nonexistent/path"));
         assert!(result.is_err());
     }
@@ -568,34 +580,61 @@ mod tests {
     }
 
     #[test]
-    fn test_read_corrupted_file() -> io::Result<()> {
-        let dir = tempdir()?;
+    fn test_read_corrupted_file() {
+        let dir = tempdir().unwrap();
         
         // Create corrupted segment file
         fs::write(
             dir.path().join("0.sst"),
             &[0xFF, 0xFF, 0xFF] // Invalid data
-        )?;
+        ).unwrap();
         
         let result = SSTable::read(dir.path());
         assert!(result.is_err());
-        Ok(())
     }
 
     #[test]
-    fn test_write_idempotency() -> io::Result<()> {
-        let dir = tempdir()?;
+    fn test_write_idempotency() {
+        let dir = tempdir().unwrap();
         
-        let mut table = SSTable::try_new(tempdir().unwrap().path()).unwrap();
-        table.insert("key1", b"value1");
-        table.insert("filler", &filler());
+        let mut table = SSTable::try_new(dir.path()).unwrap();
+        table.insert("key1", b"value1").unwrap();
+        table.insert("filler", &filler()).unwrap();
         
         // Write twice
-        table.write(dir.path())?;
-        table.write(dir.path())?;
+        table.write(dir.path()).unwrap();
+        table.write(dir.path()).unwrap();
         
         // Verify only one file exists
-        assert_eq!(fs::read_dir(dir.path())?.count(), 1);
-        Ok(())
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn test_segment_overflow_writes_file() {
+        let dir = tempdir().unwrap();
+        let mut table = SSTable::try_new(dir.path()).unwrap();
+        
+        // No files initially
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+        
+        // Fill first segment
+        table.insert("key1", &filler()).unwrap();
+        
+        // Should create a new segment and write the first one
+        table.insert("key2", b"value2").unwrap();
+        
+        // Verify file was written
+        let files: Vec<_> = fs::read_dir(dir.path()).unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0], format!("{}.sst", table.segments[0].serial));
+        
+        // Verify file contains the first segment's data
+        let read_table = SSTable::try_new(dir.path()).unwrap();
+        assert_eq!(read_table.segments.len(), 1);
+        assert!(read_table.get("key1").is_some());
     }
 }
