@@ -15,7 +15,7 @@ impl SSTableSegment {
         SSTableSegment {
             data: BTreeMap::new(),
             size: 0,
-            serial: serial,
+            serial,
         }
     }
 
@@ -50,7 +50,7 @@ pub struct SSTable {
 impl SSTable {
     pub fn try_new(path: &Path) -> io::Result<Self> {
         let mut segments = SSTable::read(path).unwrap_or_default();
-        if segments.len() == 0 {
+        if segments.is_empty() {
             segments.push(SSTableSegment::new(0));
         }
         Ok(SSTable {
@@ -124,7 +124,7 @@ impl SSTable {
     }
 
     fn read(path: &Path) -> io::Result<Vec<SSTableSegment>> {
-        if (!path.is_dir()) {
+        if !path.is_dir() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "Path is not a directory"));
         }
 
@@ -178,7 +178,7 @@ impl SSTable {
     }
 
     fn write(&self, path: &Path) -> io::Result<()> {
-        if (!path.is_dir()) {
+        if !path.is_dir() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Path {:?} is not a directory", path)));
         }
 

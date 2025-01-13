@@ -79,13 +79,14 @@ impl Write for FileSegmentStream {
                 .read(true)
                 .write(true)
                 .create(true)
+                .truncate(true)
                 .open(self.root.join(format!("{}.log", self.segments.len())))?;
             let segment = Segment::new(file, current_pos);
             self.segments.push(segment);
         }
 
         let segment = self.segments.last_mut().unwrap();
-        segment.file.write(buf)?;
+        segment.file.write_all(buf)?;
         segment.end = current_pos + size;
         self.position += size;
         Ok(size as usize)

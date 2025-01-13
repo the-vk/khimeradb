@@ -22,8 +22,8 @@ impl <T> Log<T>
         let size = entry.len() as u32;
         let size_bytes = size.to_be_bytes();
         self.storage.borrow_mut().seek(SeekFrom::End(0))?;
-        self.storage.borrow_mut().write(&size_bytes)?;
-        self.storage.borrow_mut().write(entry)?;
+        self.storage.borrow_mut().write_all(&size_bytes)?;
+        self.storage.borrow_mut().write_all(entry)?;
 
         Ok(())
     }
@@ -56,7 +56,7 @@ impl<'a, T> Iterator for LogIterator<'a, T>
     
     fn next(&mut self) -> Option<Self::Item> {
         let mut log = self.log.borrow_mut();
-        if let Err(_) = log.seek(SeekFrom::Start(self.position)) {
+        if log.seek(SeekFrom::Start(self.position)).is_err() {
             return None;
         }
 
