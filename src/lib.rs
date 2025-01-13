@@ -32,6 +32,12 @@ impl SSTEngine {
         self.kv.insert(key, value)
     }
 
+    pub fn delete(&mut self, key: &str) -> io::Result<()> {
+        self.write_log(LogOperation::Delete(key.to_string()))?;
+        self.kv.delete(key);
+        Ok(())
+    }
+
     fn write_log(&mut self, op: LogOperation) -> io::Result<()> {
         match op {
             LogOperation::Insert(key, value) => {
@@ -89,6 +95,58 @@ mod tests {
         assert_eq!(&*engine.get("key1").unwrap().unwrap(), b"value1");
         
         // Verify log file was created
+        let log_files: Vec<_> = fs::read_dir(root.path().join("log")).unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(log_files.len(), 1);
+    }
+
+    #[test]
+    fn test_engine_delete() {
+        let root = tempdir().unwrap();
+        let mut engine = SSTEngine::try_new(root.path()).unwrap();
+
+        engine.insert("key1", b"value1").unwrap();
+        assert_eq!(&*engine.get("key1").unwrap().unwrap(), b"value1");
+        
+        engine.delete("key1").unwrap();
+        assert!(engine.get("key1").unwrap().is_none());
+
+        // Verify log contains both operations
+        let log_files: Vec<_> = fs::read_dir(root.path().join("log")).unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(log_files.len(), 1);
+    }
+
+    #[test]
+    fn test_engine_delete_nonexistent() {
+        let root = tempdir().unwrap();
+        let mut engine = SSTEngine::try_new(root.path()).unwrap();
+
+        // Delete should succeed even if key doesn't exist
+        engine.delete("nonexistent").unwrap();
+        assert!(engine.get("nonexistent").unwrap().is_none());
+        
+        // Verify operation was logged
+        let log_files: Vec<_> = fs::read_dir(root.path().join("log")).unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(log_files.len(), 1);
+    }
+
+    #[test]
+    fn test_engine_delete_then_insert() {
+        let root = tempdir().unwrap();
+        let mut engine = SSTEngine::try_new(root.path()).unwrap();
+
+        engine.insert("key1", b"value1").unwrap();
+        engine.delete("key1").unwrap();
+        engine.insert("key1", b"value2").unwrap();
+        
+        assert_eq!(&*engine.get("key1").unwrap().unwrap(), b"value2");
+
+        // Verify all operations were logged
         let log_files: Vec<_> = fs::read_dir(root.path().join("log")).unwrap()
             .filter_map(|e| e.ok())
             .collect();
