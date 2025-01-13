@@ -9,6 +9,9 @@ pub struct FileSegmentStream {
 
 impl FileSegmentStream {
     pub fn new(root: PathBuf, max_segment_size: u64) -> FileSegmentStream {
+        if !root.exists() {
+            std::fs::create_dir_all(&root).unwrap();
+        }
         if !root.is_dir() {
             panic!("Root path must be a directory");
         }

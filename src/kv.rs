@@ -49,6 +49,9 @@ pub struct SSTable {
 
 impl SSTable {
     pub fn try_new(path: &Path) -> io::Result<Self> {
+        if !path.exists() {
+            std::fs::create_dir_all(path)?;
+        }
         let mut segments = SSTable::read(path).unwrap_or_default();
         if segments.is_empty() {
             segments.push(SSTableSegment::new(0));
