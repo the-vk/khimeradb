@@ -522,12 +522,7 @@ mod tests {
         table.delete("key2");
         
         table.write(dir.path()).unwrap();
-        
-        let files: Vec<_> = fs::read_dir(dir.path()).unwrap()
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .collect();
-        
+
         // Verify file names match segment serials
         let mut files: Vec<_> = fs::read_dir(dir.path()).unwrap()
             .filter_map(|e| e.ok())
