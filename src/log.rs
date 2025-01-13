@@ -6,8 +6,6 @@ pub struct Log<T>
     storage: RefCell<T>,
 }
 
-pub type FileLog = Log<std::fs::File>;
-
 impl <T> Log<T>
     where T: Read + Write + Seek {
     // Create a new MemoryLog
@@ -26,6 +24,10 @@ impl <T> Log<T>
         self.storage.borrow_mut().write_all(entry)?;
 
         Ok(())
+    }
+
+    pub fn flush(&self) -> std::io::Result<()> {
+        self.storage.borrow_mut().flush()
     }
 }
 
