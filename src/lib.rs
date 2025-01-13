@@ -1,108 +1,126 @@
+use std::{cell::RefCell, io, path::Path};
+
 pub mod kv;
+pub mod log;
 pub mod streams;
 
-use std::{cell::RefCell, io::{Read, Seek, SeekFrom, Write}};
-
-pub struct Log<T>
-    where T: Read + Write + Seek {
-    // The log entries
-    storage: RefCell<T>,
+pub struct SSTEngine {
+    kv: kv::SSTable,
+    log: log::Log<streams::FileSegmentStream>,
 }
 
-impl <T> Log<T>
-    where T: Read + Write + Seek {
-    // Create a new MemoryLog
-    pub fn new(storage: RefCell<T>) -> Log<T> {
-        Log {
-            storage
-        }
+#[derive(Debug)]
+enum LogOperation {
+    Insert(String, Vec<u8>),
+    Delete(String),
+}
+
+impl SSTEngine {
+    pub fn try_new(path: &Path) -> io::Result<Self> {
+        let kv = kv::SSTable::try_new(path.join("data").as_path())?;
+        let file_segment_stream = streams::FileSegmentStream::new(path.join("log"), 1024*1024);
+        let log = log::Log::new(RefCell::new(file_segment_stream));
+        Ok(SSTEngine { kv, log })
     }
 
-    // Append a new entry to the log
-    pub fn append(&mut self, entry: &[u8]) -> std::io::Result<()> {
-        let size = entry.len() as u32;
-        let size_bytes = size.to_be_bytes();
-        self.storage.borrow_mut().seek(SeekFrom::End(0))?;
-        self.storage.borrow_mut().write(&size_bytes)?;
-        self.storage.borrow_mut().write(entry)?;
+    pub fn get(&self, key: &str) -> io::Result<Option<Box<[u8]>>> {
+        Ok(self.kv.get(key))
+    }
+
+    pub fn insert(&mut self, key: &str, value: &[u8]) -> io::Result<()> {
+        self.write_log(LogOperation::Insert(key.to_string(), value.to_vec()))?;
+        self.kv.insert(key, value)
+    }
+
+    fn write_log(&mut self, op: LogOperation) -> io::Result<()> {
+        match op {
+            LogOperation::Insert(key, value) => {
+                let key_bytes = key.as_bytes();
+                let mut entry = Vec::with_capacity(3 + key_bytes.len() + value.len());
+                entry.push(1u8);
+                entry.extend_from_slice(key.as_bytes());
+                entry.push(0u8);
+                entry.extend_from_slice(&value);
+                entry.push(0u8);
+                self.log.append(&entry)?;
+            }
+            LogOperation::Delete(key) => {
+                let key_bytes = key.as_bytes();
+                let mut entry = Vec::with_capacity(2 + key_bytes.len());
+                entry.push(2u8);
+                entry.extend_from_slice(key_bytes);
+                entry.push(0u8);
+                self.log.append(&entry)?;
+            }
+        }
+
+        self.log.flush()?;
 
         Ok(())
     }
 }
 
-impl<'a, T> IntoIterator for &'a Log<T>
-    where T: Read + Write + Seek {
-    type Item = Box<[u8]>;
-    type IntoIter = LogIterator<'a, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        LogIterator {
-            log: &self.storage,
-            position: 0,
-            buf: Vec::new(),
-        }
-    }
-}
-
-pub struct LogIterator<'a, T>
-    where T: Read + Write + Seek {
-    log: &'a RefCell<T>,
-    position: u64,
-    buf: Vec<u8>,
-}
-
-impl<'a, T> Iterator for LogIterator<'a, T>
-    where T: Read + Write + Seek {
-    type Item = Box<[u8]>;
-    
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut log = self.log.borrow_mut();
-        if let Err(_) = log.seek(SeekFrom::Start(self.position)) {
-            return None;
-        }
-
-        let mut size_bytes = [0; 4];
-        match log.read(&mut size_bytes) {
-            Ok(0) => return None,
-            Err(_) => return None,
-            _ => {}
-        }
-
-        let size = u32::from_be_bytes(size_bytes) as usize;
-        if self.buf.len() < size {
-            self.buf.resize(size, 0);
-        }
-
-        match log.read(&mut self.buf[..size]) {
-            Ok(0) => return None,
-            Err(_) => return None,
-            _ => {}
-        }
-
-        self.position += 4 + size as u64;
-        Some(Box::from(&self.buf[..size]))
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::Log;
-    use std::cell::RefCell;
+    use super::*;
+    use tempfile::tempdir;
+    use std::fs;
 
     #[test]
-    fn test_log() {
-        let count = 100;
-        let storage:Vec<u8> = Vec::new();
-        let cursor = RefCell::new(std::io::Cursor::new(storage));
-        let mut log = Log::new(cursor);
-        let entry = [0; 100];
-        for _ in 0..count {
-            log.append(&entry).unwrap();
-        }
-        let mut count = 0;
-        for _ in log.into_iter() {
-            count += 1;
-        }
-        assert_eq!(count, count);
+    fn test_engine_creates_directories() {
+        let root = tempdir().unwrap();
+        let _engine = SSTEngine::try_new(root.path()).unwrap();
+        
+        let data_dir = root.path().join("data");
+        let log_dir = root.path().join("log");
+        
+        assert!(data_dir.is_dir());
+        assert!(log_dir.is_dir());
+    }
+
+    #[test]
+    fn test_engine_insert() {
+        let root = tempdir().unwrap();
+        let mut engine = SSTEngine::try_new(root.path()).unwrap();
+
+        engine.insert("key1", b"value1").unwrap();
+        
+        // Verify data exists
+        assert_eq!(&*engine.get("key1").unwrap().unwrap(), b"value1");
+        
+        // Verify log file was created
+        let log_files: Vec<_> = fs::read_dir(root.path().join("log")).unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(log_files.len(), 1);
+    }
+
+    #[test]
+    fn test_engine_segment_overflow() {
+        let root = tempdir().unwrap();
+        let mut engine = SSTEngine::try_new(root.path()).unwrap();
+
+        // Create enough data to force segment overflow
+        let large_value = vec![0u8; 1024];
+        engine.insert("key1", &large_value).unwrap();
+        engine.insert("key2", b"value2").unwrap();
+
+        // Verify data directory contains segment file
+        let data_files: Vec<_> = fs::read_dir(root.path().join("data")).unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        
+        assert!(!data_files.is_empty());
+        assert!(data_files.iter().any(|f| f.ends_with(".sst")));
+
+        // Verify log directory reflects the changes
+        let log_files: Vec<_> = fs::read_dir(root.path().join("log")).unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(log_files.len() >= 1); // Should have at least one log file
+        
+        // Verify data is still accessible
+        assert_eq!(&*engine.get("key2").unwrap().unwrap(), b"value2");
     }
 }
