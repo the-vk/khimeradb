@@ -265,6 +265,12 @@ impl SSTable {
             }
         }
     }
+
+    pub fn latest_serial(&self) -> u64 {
+        self.segments.last()
+            .map(|s| s.serial)
+            .unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
