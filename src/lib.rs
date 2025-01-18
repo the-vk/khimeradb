@@ -17,7 +17,7 @@ enum LogOperation {
 
 impl SSTEngine {
     pub fn try_new(path: &Path) -> io::Result<Self> {
-        let kv = kv::SSTable::try_new(path.join("data").as_path())?;
+        let kv = kv::SSTable::try_new(path.join("data").as_path(), 1024*1024)?;
         let file_segment_stream = streams::FileSegmentStream::new(path.join("log"), 1024*1024);
         let log = log::Log::new(RefCell::new(file_segment_stream));
         Ok(SSTEngine { kv, log })
@@ -159,7 +159,7 @@ mod tests {
         let mut engine = SSTEngine::try_new(root.path()).unwrap();
 
         // Create enough data to force segment overflow
-        let large_value = vec![0u8; 1024];
+        let large_value = vec![0u8; 1024*1024];
         engine.insert("key1", &large_value).unwrap();
         engine.insert("key2", b"value2").unwrap();
 
