@@ -14,6 +14,7 @@ enum LogOperation {
     Insert(String, Vec<u8>),
     Delete(String),
 }
+    Terminator = 0,
 
 impl SSTEngine {
     pub fn try_new(path: &Path) -> io::Result<Self> {
@@ -45,20 +46,20 @@ impl SSTEngine {
                 let key_bytes = key.as_bytes();
                 let mut entry = Vec::with_capacity(serial_bytes.len() + 3 + key_bytes.len() + value.len());
                 entry.extend_from_slice(&serial_bytes);
-                entry.push(1u8);
+                entry.push(OperationCode::Insert as u8);
                 entry.extend_from_slice(key.as_bytes());
-                entry.push(0u8);
+                entry.push(OperationCode::Terminator as u8);
                 entry.extend_from_slice(&value);
-                entry.push(0u8);
+                entry.push(OperationCode::Terminator as u8);
                 self.log.append(&entry)?;
             }
             LogOperation::Delete(key) => {
                 let key_bytes = key.as_bytes();
                 let mut entry = Vec::with_capacity(serial_bytes.len() + 2 + key_bytes.len());
                 entry.extend_from_slice(&serial_bytes);
-                entry.push(2u8);
+                entry.push(OperationCode::Delete as u8);
                 entry.extend_from_slice(key_bytes);
-                entry.push(0u8);
+                entry.push(OperationCode::Terminator as u8);
                 self.log.append(&entry)?;
             }
         }
