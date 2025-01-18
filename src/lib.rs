@@ -28,21 +28,23 @@ impl SSTEngine {
     }
 
     pub fn insert(&mut self, key: &str, value: &[u8]) -> io::Result<()> {
-        self.write_log(LogOperation::Insert(key.to_string(), value.to_vec()))?;
+        self.append_log(LogOperation::Insert(key.to_string(), value.to_vec()), self.kv.latest_serial() + 1)?;
         self.kv.insert(key, value)
     }
 
     pub fn delete(&mut self, key: &str) -> io::Result<()> {
-        self.write_log(LogOperation::Delete(key.to_string()))?;
+        self.append_log(LogOperation::Delete(key.to_string()), self.kv.latest_serial() + 1)?;
         self.kv.delete(key);
         Ok(())
     }
 
-    fn write_log(&mut self, op: LogOperation) -> io::Result<()> {
+    fn append_log(&mut self, op: LogOperation, serial: u64) -> io::Result<()> {
+        let serial_bytes = serial.to_be_bytes();
         match op {
             LogOperation::Insert(key, value) => {
                 let key_bytes = key.as_bytes();
-                let mut entry = Vec::with_capacity(3 + key_bytes.len() + value.len());
+                let mut entry = Vec::with_capacity(serial_bytes.len() + 3 + key_bytes.len() + value.len());
+                entry.extend_from_slice(&serial_bytes);
                 entry.push(1u8);
                 entry.extend_from_slice(key.as_bytes());
                 entry.push(0u8);
@@ -52,7 +54,8 @@ impl SSTEngine {
             }
             LogOperation::Delete(key) => {
                 let key_bytes = key.as_bytes();
-                let mut entry = Vec::with_capacity(2 + key_bytes.len());
+                let mut entry = Vec::with_capacity(serial_bytes.len() + 2 + key_bytes.len());
+                entry.extend_from_slice(&serial_bytes);
                 entry.push(2u8);
                 entry.extend_from_slice(key_bytes);
                 entry.push(0u8);
